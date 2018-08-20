@@ -93,19 +93,33 @@ class PredictPostings(SmartImporterDecorator):
     def define_pipeline(self):
         '''
         Defines the machine learning pipeline for predicting and suggesting postings.
+        '''
+        transformer_weights, transformers = self.define_pipeline_featureunion()
+        self.pipeline = Pipeline([
+            ('union', FeatureUnion(
+                transformer_list=transformers,
+                transformer_weights=transformer_weights)),
+            ('svc', SVC(kernel='linear')),
+        ])
+
+    def define_pipeline_featureunion(self):
+        '''
+        Defines transformers and transformer weights for the pipeline's featureunion.
         The pipeline definition is created dynamically depending on available training data.
         For example, payees are only included as feature in the pipeline if the training data contains payees.
+        :return: Returns a list of transformers and transformer_weights to be used in a scikit-learn FeatureUnion.
         '''
         if not self.converted_training_data:
             raise ValueError("Cannot define the machine learning pipeline "
                              "because the converted training data is empty")
-
         if len(self.converted_training_data) < 2:
             raise ValueError("Cannot define the machine learning pipeline "
                              "because the training data consists of less than two elements.")
 
         transformers = []
         transformer_weights = {}
+
+        # narration:
         transformers.append(
             ('narration', Pipeline([
                 ('getNarration', ml.GetNarration()),
@@ -113,6 +127,8 @@ class PredictPostings(SmartImporterDecorator):
             ]))
         )
         transformer_weights['narration'] = 0.8
+
+        # account:
         transformers.append(
             ('account', Pipeline([
                 ('getReferencePostingAccount', ml.GetReferencePostingAccount()),
@@ -120,6 +136,8 @@ class PredictPostings(SmartImporterDecorator):
             ]))
         )
         transformer_weights['account'] = 0.8
+
+        # payees:
         distinctPayees = set(map(lambda trx: trx.txn.payee, self.converted_training_data))
         if len(distinctPayees) > 1:
             transformers.append(
@@ -129,6 +147,8 @@ class PredictPostings(SmartImporterDecorator):
                 ]))
             )
             transformer_weights['payee'] = 0.5
+
+        # day of month
         transformers.append(
             ('dayOfMonth', Pipeline([
                 ('getDayOfMonth', ml.GetDayOfMonth()),
@@ -136,12 +156,7 @@ class PredictPostings(SmartImporterDecorator):
             ]))
         )
         transformer_weights['dayOfMonth'] = 0.1
-        self.pipeline = Pipeline([
-            ('union', FeatureUnion(
-                transformer_list=transformers,
-                transformer_weights=transformer_weights)),
-            ('svc', SVC(kernel='linear')),
-        ])
+        return transformer_weights, transformers
 
     def train_pipeline(self):
         '''
